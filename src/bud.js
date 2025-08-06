@@ -10,7 +10,7 @@ import { Command } from 'commander';
 const program = new Command();
 
 class Bud {
-    constructor(repoPath = '.') {
+    constructor(repoPath = process.cwd() + '/') {
         this.repoPath = path.join(repoPath, '.bud');
         this.objectsPath = path.join(this.repoPath, 'objects');
         this.headPath = path.join(this.repoPath, 'HEAD');
