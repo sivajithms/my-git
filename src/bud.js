@@ -1,6 +1,13 @@
+#!/usr/bin/env node
+
 import path from 'path';
 import fs from 'fs/promises';
-import crypto from 'crypto'
+import crypto from 'crypto';
+import { diffLines } from 'diff'
+import chalk from 'chalk';
+import { Command } from 'commander';
+
+const program = new Command();
 
 class Bud {
     constructor(repoPath = '.') {
@@ -8,7 +15,6 @@ class Bud {
         this.objectsPath = path.join(this.repoPath, 'objects');
         this.headPath = path.join(this.repoPath, 'HEAD');
         this.indexPath = path.join(this.repoPath, 'index');
-        this.init()
     }
 
     async init() {
@@ -17,6 +23,7 @@ class Bud {
 
             await fs.writeFile(this.headPath, '', { flag: 'wx' }); //wx creates the file, fails if already exists
             await fs.writeFile(this.indexPath, JSON.stringify([]), { flag: 'wx' });
+            console.log('Initialized a bud repository')
         } catch (err) {
             console.log('already a bud repo')
         }
@@ -29,7 +36,7 @@ class Bud {
     async add(fileToBeAdded) {
         const fileData = await fs.readFile(fileToBeAdded, { encoding: 'utf-8' });
         const fileHash = this.hashObject(fileData);
-        console.log(fileHash);
+        // console.log(fileHash);
         const newFileHashObjectPath = path.join(this.objectsPath, fileHash); // .bud/objects/14kjbkfa
         await fs.writeFile(newFileHashObjectPath, fileData);
 
@@ -53,7 +60,7 @@ class Bud {
         const commitData = {
             timeStamp: new Date().toISOString(),
             message,
-            file: index,
+            files: index,
             parent: parentCommit
         };
 
@@ -88,12 +95,107 @@ class Bud {
             currentCurrentHash = commitData.parent;
         }
     }
+
+    async showCommitDiff(commitHash) {
+        const commitData = JSON.parse(await this.getCommitData(commitHash));
+        if(!commitData) return;
+
+        console.log('changes in the last commits are: ');
+
+        for(const file of commitData.files) {
+            console.log('\nFile: ', file.path);
+            const fileContent = await this.getFileContent(file.hash);
+
+            console.log('file content: ',fileContent);                      
+            
+            if(commitData.parent) {                
+                const parentCommitData = JSON.parse(await this.getCommitData(commitData.parent));
+
+                const getParentFileContent = await this.getParentFileContent(parentCommitData, file.path);
+                
+                console.log('\nDiff: ');
+                if(getParentFileContent ) {
+                    const diff = diffLines(getParentFileContent, fileContent);
+
+                    // console.log(diff);
+
+                    diff.forEach(part => {
+                        if(part.added) {
+                            process.stdout.write(chalk.green('++' + part.value));
+                        } else if(part.removed) {
+                            process.stdout.write(chalk.red('--' + part.value));
+                        } else {
+                            process.stdout.write(chalk.gray('+' + part.value));
+                        }
+                    })
+                    console.log();                    
+                } else {
+                    console.log(chalk.green('++' + fileContent));
+                }
+            } else {
+                console.log('First commit');                
+            }
+        }
+        
+    }
+
+    async getParentFileContent(parentCommitData, filePath) {        
+        const parentFile = parentCommitData.files.find(file => file.path == filePath);
+        if(parentFile) {
+            return await this.getFileContent(parentFile.hash);
+        }
+    }
+
+    async getCommitData(commitHash) {
+        const commitPath = path.join(this.objectsPath, commitHash);
+        try {
+            return await fs.readFile(commitPath, { encoding: 'utf-8'});
+        } catch (error) {
+            console.log('failed to read commit data', error.message);
+            return null;
+        }
+    }
+
+    async getFileContent(fileHash) {
+        const filePath = path.join(this.objectsPath, fileHash);
+        return await fs.readFile(filePath, {encoding: 'utf-8'});
+    }
 }
 
-(async () => {
-    const bud = new Bud();
-    await bud.add('test.txt');
-    await bud.commit('third commit');
-    await bud.log();
-})()
+// (async () => {
+//     const bud = new Bud();
+    // await bud.add('test.txt');
+    // await bud.add('test2.txt');
+    // await bud.commit('second commit');
 
+    // await bud.log();
+//     await bud.showCommitDiff('ae450de68776d1bff8971b9bcbc50452102e0370')
+// })()
+
+program.command('init').action(async () => {
+    const bud = new Bud();
+    await bud.init()
+});
+
+program.command('add <file>').action(async (file) => {
+    const bud = new Bud();
+    await bud.add(file);
+});
+
+program.command('commit <message>').action(async (message) => {
+    const bud = new Bud();
+    await bud.commit(message);
+});
+
+program.command('log').action(async () => {
+    const bud = new Bud();
+    await bud.log();
+});
+
+program.command('show-diff <commitHash>').action(async (commitHash) => {
+    const bud = new Bud();
+    await bud.showCommitDiff(commitHash);
+});
+
+// console.log(process.argv);
+program.parse(process.argv);
